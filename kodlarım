@@ -1,0 +1,1018 @@
+using ETICARETAPI;
+using ETICARETAPI.Models;
+using Microsoft.EntityFrameworkCore;
+
+var builder = WebApplication.CreateBuilder(args);
+
+
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlite("Data Source=eticaret.db"));
+
+
+builder.Services.AddCors(options => {
+    options.AddDefaultPolicy(policy => {
+        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+    });
+});
+
+var app = builder.Build();
+app.UseCors();
+
+if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI(c => {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "E-Ticaret API V1");
+        c.RoutePrefix = "swagger";
+    });
+}
+
+app.UseHttpsRedirection();
+app.UseCors(); 
+app.UseAuthorization();
+app.UseDefaultFiles();
+app.UseStaticFiles();
+app.MapControllers();
+
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    context.Database.EnsureCreated();
+
+    if (!context.Products.Any())
+    {
+        
+        context.SaveChanges();
+    }
+}
+
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
+app.UseRouting();
+app.UseCors();
+app.UseAuthorization();
+app.MapControllers();
+app.Run();
+
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>ShopVerse - Admin Paneli</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <div class="container py-5">
+        <div class="card shadow border-0 p-4">
+            <h2 class="fw-bold mb-4">Yeni Ürün Ekle</h2>
+            
+            <form id="productForm">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Ürün Adı</label>
+                        <input type="text" id="name" class="form-control" placeholder="Örn: Siyah Elbise" required>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Fiyat (TL)</label>
+                        <input type="number" id="price" class="form-control" placeholder="0.00" required>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Açıklama</label>
+                        <textarea id="description" class="form-control" rows="3"></textarea>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Görsel URL</label>
+                        <input type="text" id="imagePath" class="form-control" placeholder="https://...">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Kategori</label>
+                        <select id="categoryId" class="form-select">
+                            <option value="1">Giyim</option>
+                            <option value="2">Aksesuar</option>
+                        </select>
+                    </div>
+                    <div class="col-12 mt-4">
+                        <button type="submit" class="btn btn-primary px-5 fw-bold">Kaydet</button>
+                        <a href="index.html" class="btn btn-outline-secondary px-5">İptal</a>
+                    </div>
+                </div>
+            </form>
+            <div id="statusMessage" class="mt-3"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('productForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const productData = {
+                name: document.getElementById('name').value,
+                price: parseFloat(document.getElementById('price').value),
+                description: document.getElementById('description').value,
+                imagePath: document.getElementById('imagePath').value,
+                categoryId: parseInt(document.getElementById('categoryId').value)
+            };
+
+            try {
+                const response = await fetch('http://localhost:5256/api/Products', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(productData)
+                });
+
+                if (response.ok) {
+                    document.getElementById('statusMessage').innerHTML = "<div class='alert alert-success'>Ürün başarıyla eklendi!</div>";
+                    document.getElementById('productForm').reset();
+                } else {
+                    throw new Error("Ekleme başarısız.");
+                }
+            } catch (err) {
+                document.getElementById('statusMessage').innerHTML = "<div class='alert alert-danger'>Hata: API'ye bağlanılamadı.</div>";
+            }
+        });
+    </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ödeme Yap - ShopVerse</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .checkout-card { border-radius: 15px; border: none; }
+        .product-item { background: #fff; border-radius: 10px; transition: 0.3s; }
+        .product-item:hover { transform: translateY(-2px); }
+    </style>
+</head>
+<body>
+
+<div class="container py-5">
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="card checkout-card shadow-sm p-4">
+                <h4 class="fw-bold mb-4">Sepetim 🛒</h4>
+                <div id="cart-items">
+                    </div>
+                <div class="d-flex justify-content-between mt-4 border-top pt-3">
+                    <h5 class="fw-bold">Toplam Tutar:</h5>
+                    <h5 class="fw-bold text-primary" id="total-price">0 ₺</h5>
+                </div>
+                <a href="index.html" class="btn btn-link text-decoration-none mt-2">← Alışverişe Devam Et</a>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card checkout-card shadow-sm p-4 bg-white">
+                <h4 class="fw-bold mb-4">Ödeme Bilgileri 💳</h4>
+                <form id="payment-form">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Kart Üzerindeki İsim</label>
+                        <input type="text" class="form-control rounded-pill" placeholder="Ad Soyad" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Kart Numarası</label>
+                        <input type="text" class="form-control rounded-pill" placeholder="0000 0000 0000 0000" maxlength="16" required>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label small fw-bold">Son Kullanma</label>
+                            <input type="text" class="form-control rounded-pill" placeholder="AA/YY" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label small fw-bold">CVV</label>
+                            <input type="password" class="form-control rounded-pill" placeholder="*" maxlength="3" required>
+                        </div>
+                    </div>
+                    <button type="button" onclick="completePayment()" class="btn btn-primary w-100 rounded-pill py-3 fw-bold shadow-sm">
+                        Ödemeyi Tamamla
+                    </button>
+                    <button type="button" onclick="clearCart()" class="btn btn-outline-danger w-100 rounded-pill mt-2 btn-sm border-0">Sepeti Temizle</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function loadCart() {
+        
+        const cart = JSON.parse(localStorage.getItem("cart")) || [];
+        const container = document.getElementById("cart-items");
+        const totalElement = document.getElementById("total-price");
+        
+        container.innerHTML = "";
+        let total = 0;
+
+        
+        if (cart.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-5">
+                    <p class="text-muted">Sepetinizde ürün bulunmamaktadır.</p>
+                </div>`;
+            totalElement.innerText = "0 ₺";
+            return;
+        }
+
+        
+        cart.forEach((item, index) => {
+            
+            let itemPrice = parseFloat(item.price);
+            total += itemPrice;
+
+            container.innerHTML += `
+                <div class="product-item d-flex align-items-center justify-content-between p-3 mb-2 border shadow-sm bg-white">
+                    <div class="d-flex align-items-center">
+                        <div class="ms-2">
+                            <h6 class="mb-0 fw-bold text-dark">${item.name}</h6>
+                            <small class="text-primary fw-bold">${itemPrice.toLocaleString('tr-TR')} ₺</small>
+                        </div>
+                    </div>
+                    <button onclick="removeItem(${index})" class="btn btn-sm btn-outline-danger border-0">
+                        <i class="bi bi-trash"></i> Kaldır
+                    </button>
+                </div>`;
+        });
+
+        
+        totalElement.innerText = total.toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + " ₺";
+    }
+
+    function removeItem(index) {
+        let cart = JSON.parse(localStorage.getItem("cart")) || [];
+       
+        cart.splice(index, 1);
+        
+        localStorage.setItem("cart", JSON.stringify(cart));
+        
+        loadCart();
+    }
+
+    function completePayment() {
+        const cart = JSON.parse(localStorage.getItem("cart")) || [];
+        if(cart.length === 0) {
+            alert("Sepetiniz boş! Lütfen önce ürün ekleyin.");
+            return;
+        }
+        
+        
+        alert("Ödemeniz başarıyla alındı! Siparişiniz hazırlanıyor. 🎉");
+        localStorage.removeItem("cart"); 
+        window.location.href = "index.html"; 
+    }
+
+    function clearCart() {
+        if(confirm("Sepeti temizlemek istediğinize emin misiniz?")) {
+            localStorage.removeItem("cart");
+            loadCart();
+        }
+    }
+
+    
+    window.onload = loadCart;
+</script>
+
+        totalElement.innerText = total.toLocaleString('tr-TR') + " ₺";
+    }
+
+    function completePayment() {
+        const cart = JSON.parse(localStorage.getItem("cart")) || [];
+        if(cart.length === 0) {
+            alert("Sepetiniz boş!");
+            return;
+        }
+        
+        // Simüle edilmiş ödeme süreci
+        alert("Ödemeniz başarıyla alındı! Siparişiniz hazırlanıyor. 🎉");
+        localStorage.removeItem("cart"); // Ödeme bittiği için sepeti temizle
+        window.location.href = "index.html"; // Anasayfaya yönlendir
+    }
+
+    function removeItem(index) {
+        let cart = JSON.parse(localStorage.getItem("cart")) || [];
+        cart.splice(index, 1);
+        localStorage.setItem("cart", JSON.stringify(cart));
+        loadCart();
+    }
+
+    function clearCart() {
+        if(confirm("Sepeti temizlemek istediğinize emin misiniz?")) {
+            localStorage.removeItem("cart");
+            loadCart();
+        }
+    }
+
+    window.onload = loadCart;
+</script>
+</div> 
+
+   <script>
+        function loadCart() {
+            const cart = JSON.parse(localStorage.getItem("cart")) || [];
+            const container = document.getElementById("cart-items");
+            const totalElement = document.getElementById("total-price");
+            
+            container.innerHTML = "";
+            let total = 0;
+
+            if (cart.length === 0) {
+                container.innerHTML = <div class="alert alert-light text-center py-4">Sepetiniz boş.</div>;
+                totalElement.innerText = "0 ₺";
+                return;
+            }
+
+            cart.forEach((item, index) => {
+                let itemPrice = parseFloat(item.price) || 0;
+                total += itemPrice;
+
+                container.innerHTML += `
+                    <div class="product-item d-flex align-items-center justify-content-between p-3 mb-2 border shadow-sm bg-white">
+                        <div>
+                            <h6 class="mb-0 fw-bold">${item.name}</h6>
+                            <small class="text-primary fw-bold">${itemPrice.toLocaleString('tr-TR')} ₺</small>
+                        </div>
+                        <button onclick="removeItem(${index})" class="btn btn-sm btn-outline-danger border-0">Kaldır</button>
+                    </div>`;
+            });
+
+            totalElement.innerText = total.toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + " ₺";
+        }
+
+        function completePayment() {
+            const cart = JSON.parse(localStorage.getItem("cart")) || [];
+            if(cart.length === 0) {
+                alert("Sepetiniz boş!");
+                return;
+            }
+            alert("Ödemeniz başarıyla alındı! Siparişiniz hazırlanıyor. 🎉");
+            localStorage.removeItem("cart");
+            window.location.href = "index.html"; 
+        }
+
+        function removeItem(index) {
+            let cart = JSON.parse(localStorage.getItem("cart")) || [];
+            cart.splice(index, 1);
+            localStorage.setItem("cart", JSON.stringify(cart));
+            loadCart();
+        }
+
+        function clearCart() {
+            if(confirm("Sepeti temizlemek istediğinize emin misiniz?")) {
+                localStorage.removeItem("cart");
+                loadCart();
+            }
+        }
+
+        window.onload = loadCart;
+    </script>
+</body>
+</html>
+
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Ödeme Yap - ShopVerse</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f7f6; }
+        .payment-card { max-width: 500px; margin: 50px auto; border-radius: 20px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="card payment-card shadow-lg border-0 p-4">
+        <h3 class="fw-bold text-center mb-4">Ödeme Bilgileri 💳</h3>
+        <form id="payment-form">
+            <div class="mb-3">
+                <label class="form-label">Kart Üzerindeki İsim</label>
+                <input type="text" class="form-control rounded-pill" placeholder="Ad Soyad" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Kart Numarası</label>
+                <input type="text" class="form-control rounded-pill" placeholder="0000 0000 0000 0000" maxlength="16" required>
+            </div>
+            <div class="row">
+                <div class="col-6 mb-3">
+                    <label class="form-label">Son Kullanma</label>
+                    <input type="text" class="form-control rounded-pill" placeholder="AA/YY" required>
+                </div>
+                <div class="col-6 mb-3">
+                    <label class="form-label">CVV</label>
+                    <input type="password" class="form-control rounded-pill" placeholder="*" maxlength="3" required>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary w-100 rounded-pill py-2 fw-bold mt-3">Ödemeyi Tamamla</button>
+            <a href="cart.html" class="btn btn-link w-100 text-muted mt-2 text-decoration-none">Sepete Geri Dön</a>
+        </form>
+    </div>
+</div>
+
+<script>
+    document.getElementById("payment-form").addEventListener("submit", function(e) {
+        e.preventDefault();
+        
+        
+        alert("Ödemeniz başarıyla alındı! Siparişiniz hazırlanıyor.");
+        
+        
+        localStorage.removeItem("cart");
+        
+        
+        window.location.href = "index.html";
+    });
+</script>
+
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShopVerse Mağazası 🛍️</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <style>
+        
+        body { 
+            background-color: #f8f9fa; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        
+        .navbar { 
+            background: white !important; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05); 
+        }
+        .navbar-brand { 
+            color: #ff5a00 !important; 
+            font-weight: 800; 
+        }
+
+        
+        .hero-section {
+            background: linear-gradient(135deg, #ff9a00 0%, #ff5a00 100%);
+            border-radius: 30px;
+            color: white;
+            padding: 50px;
+            margin-top: 30px;
+            box-shadow: 0 15px 30px rgba(255, 90, 0, 0.2);
+            border: none;
+        }
+
+       
+        .card {
+            border: none;
+            border-radius: 20px;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+            height: 100%;
+        }
+        .card:hover { 
+            transform: translateY(-10px); 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .card-img-top { 
+            border-radius: 20px 20px 0 0; 
+            height: 250px;
+            object-fit: cover; 
+        }
+
+        .btn-primary {
+            background-color: #ff5a00;
+            border: none;
+            border-radius: 10px;
+            padding: 10px 20px;
+        }
+        .btn-primary:hover {
+            background-color: #e65100;
+        }
+    </style>
+</head>
+<body class="bg-light">
+
+    <nav class="navbar navbar-expand-lg navbar-light sticky-top bg-white shadow-sm">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="#">ShopVerse 🛍️</a>
+            <div class="ms-auto d-flex align-items-center">
+                <a class="nav-link me-3" href="index.html">Anasayfa</a>
+                <a class="nav-link me-3 fw-bold" href="index.html">Anasayfa</a>
+<a class="nav-link me-3 fw-bold text-success" href="cart.html">Sepetim 🛒</a>
+<a class="nav-link me-3 fw-bold text-danger" href="admin.html">Admin Paneli</a>
+                <a href="login.html" class="btn btn-outline-dark me-2 rounded-pill">Giriş Yap</a>
+                <a href="register.html" class="btn btn-primary rounded-pill">Kayıt Ol</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="hero-section text-center text-md-start p-5 rounded-5 shadow-lg" style="background: linear-gradient(135deg, #ff8c42, #ff5a00); color: white;">
+            <div class="row align-items-center">
+                <div class="col-md-7">
+                    <h1 class="display-4 fw-bold mb-3">Aramıza Katılın!</h1>
+                    <a href="login.html" class="btn btn-outline-dark rounded-pill px-4 shadow-sm">Giriş Yap</a>
+                    <p class="lead mb-4">ShopVerse ailesine üye olun, size özel fırsatları ve avantajlı alışverişin keyfini kaçırmayın.</p>
+                    <a href="register.html" class="btn btn-dark btn-lg px-5 rounded-pill shadow">Kayıt Ol -></a>
+                </div>
+            </div>
+            <div class="container mt-5" id="urunler-bolumu">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h3 class="fw-bold">Keşfetmeye Başla</h3>
+        <div class="category-buttons">
+            <button class="btn btn-primary rounded-pill px-4 shadow-sm" onclick="loadProducts()">Tümü</button>
+            <button class="btn btn-outline-secondary rounded-pill px-4 ms-2 shadow-sm" onclick="filterByCategory(1)">Elektronik</button>
+            <button class="btn btn-outline-secondary rounded-pill px-4 ms-2 shadow-sm" onclick="filterByCategory(2)">Giyim</button>
+        </div>
+    </div>
+
+    <div id="product-list" class="row g-4">
+        </div>
+           </div>
+        </div>
+    </div>
+
+    <div id="urunler-bolumu" class="container my-5 p-4 rounded-4 bg-white shadow-sm">
+        <div class="text-center mb-5">
+            <h2 class="fw-bold">Öne Çıkan Ürünler</h2>
+            <div style="width: 60px; height: 4px; background: #ff5a00; margin: 10px auto; border-radius: 2px;"></div>
+        </div>
+
+        <div id="product-list" class="row row-cols-1 row-cols-md-3 row-cols-lg-4 g-4">
+            <p class="text-center w-100">Ürünler yükleniyor...</p>
+        </div>
+    </div>
+
+    <script>
+        
+        window.onload = loadProducts;
+
+        async function loadProducts() {
+            try {
+                const response = await fetch('http://localhost:5256/api/Products');
+                const products = await response.json();
+                displayProducts(products);
+            } catch (err) {
+                console.error("Hata:", err);
+            }
+        }
+
+        async function filterByCategory(id) {
+            try {
+                const response = await fetch('http://localhost:5256/api/Products');
+                const allProducts = await response.json();
+                const filtered = allProducts.filter(p => p.categoryId == id);
+                displayProducts(filtered);
+            } catch (err) {
+                console.error("Filtreleme hatası:", err);
+            }
+        }
+
+        function displayProducts(products) {
+    const list = document.getElementById("product-list");
+    if (!list) return;
+
+    list.innerHTML = "";
+
+    products.forEach(p => {
+        list.innerHTML += `
+            <div class="col-md-3 mb-4">
+                <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden">
+                    <img src="${p.imagePath}" 
+                         onerror="this.src='https://loremflickr.com/400/400/fashion,product?lock=${p.id}'"
+                         class="card-img-top" 
+                         style="height: 200px; object-fit: cover;">
+                    <div class="card-body text-center">
+                        <h6 class="fw-bold">${p.name}</h6>
+                        <p class="text-primary fw-bold">₺${p.price.toLocaleString()}</p>
+                        <a href="product-details.html?id=${p.id}" class="btn btn-outline-primary w-100 rounded-pill">İncele</a>
+                        <button onclick="addToCart(${p.id}, '${p.name}', ${p.price})" class="btn btn-success w-100 rounded-pill mt-2">Sepete Ekle</button>
+                    </div>
+                </div>
+            </div>`;
+    });
+}
+       function addToCart(id, name, price) {
+    
+    let cart = JSON.parse(localStorage.getItem("cart")) || [];
+    
+    
+    const product = { 
+        id: parseInt(id), 
+        name: name, 
+        price: parseFloat(price) 
+    };
+    
+    
+    cart.push(product);
+    localStorage.setItem("cart", JSON.stringify(cart));
+    
+    
+    alert(name + " sepete eklendi!");
+}
+
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>ShopVerse - Giriş Yap</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; display: flex; align-items: center; justify-content: center; height: 100vh; }
+        .login-card { width: 400px; padding: 2rem; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); background: white; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h2 class="text-center mb-4">Giriş Yap</h2>
+        <form id="loginForm">
+            <div class="mb-3">
+                <label class="form-label">E-posta</label>
+                <input type="email" class="form-control" id="email" required placeholder="ornek@mail.com">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Şifre</label>
+                <input type="password" class="form-control" id="password" required>
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Giriş Yap</button>
+            <div class="text-center mt-3">
+                <a href="index.html" class="text-muted">Ana Sayfaya Dön</a>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').onsubmit = async (e) => {
+            e.preventDefault();
+            alert("Giriş başarılı! Ana sayfaya yönlendiriliyorsunuz.");
+            window.location.href = "index.html";
+        };
+    </script>
+</body>
+</html>
+
+!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>ShopVerse - Ürün Detayı</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <div class="container my-5">
+        <div id="product-detail-content" class="bg-white p-5 rounded-4 shadow-sm border-0">
+            <p class="text-center">Ürün yükleniyor...</p>
+        </div>
+        <div class="mt-4 text-center">
+            <a href="index.html" class="btn btn-outline-dark rounded-pill px-4">← Ana Sayfaya Dön</a>
+        </div>
+    </div>
+
+   <script>
+        
+        const urlParams = new URLSearchParams(window.location.search);
+        const productId = urlParams.get('id');
+
+        async function getProductDetail() {
+            try {
+                const response = await fetch('http://localhost:5256/api/Products/' + productId);
+                
+               if (!response.ok) throw new Error("Ürün bulunamadı");
+
+                const product = await response.json();
+                const detailDiv = document.getElementById("product-detail-content");
+
+                
+                detailDiv.innerHTML = `
+                    <div class="row align-items-center py-5">
+                        <div class="col-md-6 text-center">
+                            <img src="${product.imagePath}" 
+     onerror="this.src='https://loremflickr.com/600/600/fashion,clothes?lock=${product.id}'"
+     class="img-fluid rounded-4 shadow-lg" 
+     style="max-height: 500px; object-fit: cover;">
+                                 class="img-fluid rounded-4 shadow-lg" 
+                                 style="max-height: 500px; object-fit: cover;">
+                        </div>
+                        <div class="col-md-6 px-md-5">
+                            <h1 class="fw-bold display-4 mb-3">${product.name}</h1>
+                            <h2 class="text-primary fw-bold mb-4 display-6">₺${product.price.toLocaleString()}</h2>
+                            <p class="lead text-muted mb-5">ShopVerse özel koleksiyonundan seçilen bu ürün, modern tasarımıyla tarzınızı tamamlar.</p>
+                            <button class="btn btn-primary btn-lg rounded-pill py-3 fw-bold w-100 shadow">Sepete Ekle</button>
+                        </div>
+                    </div>`;
+
+            } catch (err) {
+                console.error("Detay Hatası:", err);
+                document.getElementById("product-detail-content").innerHTML = `
+                    <div class="alert alert-danger text-center my-5">
+                        <h4>Ürün Yüklenemedi</h4>
+                        <p>Lütfen API'nin çalıştığından emin olun.</p>
+                    </div>`;
+            }
+        }
+
+       
+        if (productId) {
+            getProductDetail();
+        } else {
+            
+            window.location.href = 'index.html';
+        }
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Kayıt Ol - E-Ticaret</title>
+    <style>
+    body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #f0f2f5;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+    }
+    .main-container {
+        display: flex;
+        width: 900px;
+        background: white;
+        border-radius: 20px;
+        overflow: hidden;
+        box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+    }
+    
+    .left-side {
+        flex: 1;
+        background: linear-gradient(135deg, #ff9a00 0%, #ff5a00 100%);
+        color: white;
+        padding: 40px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        text-align: center;
+    }
+    
+    .right-side {
+        flex: 1.2;
+        padding: 50px;
+    }
+    .form-group { margin-bottom: 15px; }
+    .form-row { display: flex; gap: 10px; }
+    
+    input {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background: #f9f9f9;
+        box-sizing: border-box;
+    }
+    button {
+        width: 100%;
+        padding: 15px;
+        background: #ffb400;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-weight: bold;
+        cursor: pointer;
+        margin-top: 20px;
+    }
+    button:hover { background: #e6a200; }
+</style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="left-side">
+            <h1>Aramıza Katılın!</h1>
+            <p>ShopVerse ailesine üye olun, size özel fırsatları ve avantajlı alışverişin keyfini kaçırmayın.</p>
+        </div>
+
+        <div class="right-side">
+            <h2 style="margin-bottom: 10px;">Kayıt Ol</h2>
+            <p style="color: #888; font-size: 0.9em; margin-bottom: 25px;">Hesap bilgilerinizi girerek hızlıca üye olun.</p>
+            
+            <div class="form-row">
+                <input type="text" id="firstName" placeholder="Ad">
+                <input type="text" id="lastName" placeholder="Soyad">
+            </div>
+            
+            <div style="margin-top: 15px;">
+                <input type="email" id="email" placeholder="E-Posta Adresi" style="width: 100%;">
+            </div>
+            
+            <div class="form-row" style="margin-top: 15px;">
+                <input type="password" id="password" placeholder="Şifre">
+                <input type="password" placeholder="Şifre Tekrar">
+            </div>
+
+            <button onclick="kayitOl()">Kayıt Ol -></button>
+            
+            <p id="mesaj" style="text-align:center; margin-top:15px; font-weight: bold;"></p>
+            
+            <p style="text-align:center; font-size: 0.9em; margin-top: 20px;">
+                Zaten bir hesabınız var mı? <a href="#" style="color: #ff5a00; text-decoration: none; font-weight: bold;">Hemen Giriş Yap</a>
+            </p>
+        </div>
+    </div>
+    <script>
+        async function kayitOl() {
+            const data = {
+                firstName: document.getElementById('firstName').value,
+                lastName: document.getElementById('lastName').value,
+                email: document.getElementById('email').value,
+                password: document.getElementById('password').value,
+                role: "Customer"
+            };
+
+            try {
+                const response = await fetch('http://localhost:5256/api/Auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    document.getElementById('mesaj').innerText = "Kayıt Başarılı!";
+                    document.getElementById('mesaj').style.color = "green";
+                } else {
+                    const error = await response.text();
+                    document.getElementById('mesaj').innerText = "Hata: " + error;
+                    document.getElementById('mesaj').style.color = "red";
+                }
+            } catch (err) {
+                console.error(err);
+                document.getElementById('mesaj').innerText = "API'ye bağlanılamadı!";
+            }
+        }
+    </script>
+</body>
+</html>
+
+namespace ETICARETAPI.Models
+{
+    public class Category
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+    }
+}
+
+namespace ETICARETAPI.Models
+{
+    public class Product
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public decimal Price { get; set; }
+        public string ImagePath { get; set; } = string.Empty;
+    }
+}
+
+namespace ETICARETAPI.Models
+{
+    public class User
+    {
+        public int Id { get; set; }
+        public string FirstName { get; set; } = "";
+        public string LastName { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string Role { get; set; } = "Customer";
+    }
+}
+
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using ETICARETAPI.Models;
+using ETICARETAPI;
+
+namespace ETICARETAPI.Controllers
+{
+    [Route("api/[controller]")]
+    [ApiController]
+    public class AuthController : ControllerBase
+    {
+        private readonly AppDbContext _context;
+
+        public AuthController(AppDbContext context)
+        {
+            _context = context;
+        }
+
+        [HttpPost("register")]
+        public async Task<IActionResult> Register([FromBody] User user)
+        {
+            if (await _context.Users.AnyAsync(u => u.Email == user.Email))
+                return BadRequest("Bu e-posta zaten kayıtlı.");
+
+            _context.Users.Add(user);
+            await _context.SaveChangesAsync();
+            return Ok("Kayıt başarılı!");
+        }
+
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] User loginUser)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => 
+                u.Email == loginUser.Email && u.Password == loginUser.Password);
+
+            if (user == null) return Unauthorized("E-posta veya şifre hatalı!");
+
+            return Ok(new { message = $"Hoş geldin {user.FirstName}!", role = user.Role });
+        }
+    }
+}
+
+using ETICARETAPI;
+using ETICARETAPI.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc;
+using ETicaretAPI;
+
+namespace ETicaretAPI.Controllers
+{
+    [Route("api/[controller]")]
+    [ApiController]
+    public class CategoriesController : ControllerBase
+    {
+        private readonly AppDbContext _context;
+
+        public CategoriesController(AppDbContext context)
+        {
+            _context = context;
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> Get()
+        {
+            
+            return Ok(new { message = "Kategori sistemi hazır!" });
+        }
+    }
+}
+using ETICARETAPI;
+using ETICARETAPI.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc;
+using ETicaretAPI;
+
+namespace ETicaretAPI.Controllers
+{
+    [Route("api/[controller]")]
+    [ApiController]
+    public class ProductsController : ControllerBase
+    {
+        private readonly AppDbContext _context;
+
+        public ProductsController(AppDbContext context)
+        {
+            _context = context;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<Product>>> GetProducts()
+        {
+            return await _context.Products.ToListAsync();
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<Product>> PostProduct(Product product)
+        {
+            _context.Products.Add(product);
+            await _context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetProducts), new { id = product.Id }, product);
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteProduct(int id)
+        {
+            var product = await _context.Products.FindAsync(id);
+            if (product == null) return NotFound();
+
+            _context.Products.Remove(product);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+    }
+}
+
